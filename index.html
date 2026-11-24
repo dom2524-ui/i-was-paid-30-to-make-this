@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>SuperBitV2 Web Bluetooth Controller</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; margin-top: 40px; }
+    button.connect { padding: 12px 24px; font-size: 16px; cursor: pointer; }
+    .grid { display: inline-grid; grid-template-columns: repeat(3, 70px); gap: 10px; margin-top: 25px; }
+    .key { padding: 22px 0; border: 2px solid #333; border-radius: 8px; font-weight: bold; font-size: 20px; user-select: none; cursor: pointer; }
+    .active { background-color: #2196F3; color: white; border-color: #0b7dda; }
+    .empty { border: none; cursor: default; }
+  </style>
+</head>
+<body>
+  <button id="connectBtn" class="connect">Connect to micro:bit</button>
+  <p>Status: <strong id="status">Disconnected</strong> | Last Sent: <strong id="lastCmd">-</strong></p>
+
+  <div class="grid">
+    <div id="key-q" class="key">Q</div>
+    <div id="key-w" class="key">W</div>
+    <div id="key-e" class="key">E</div>
+    <div id="key-a" class="key">A</div>
+    <div id="key-s" class="key">S</div>
+    <div id="key-d" class="key">D</div>
+    <div id="key-z" class="key">Z</div>
+    <div class="empty"></div>
+    <div id="key-c" class="key">C</div>
+  </div>
+
+  <script>
+    const UART_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+    // Note: 6e400003 is the micro:bit's RX characteristic (Browser writes -> micro:bit receives)
+    const UART_RX_CHARACTERISTIC_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+
+    let rxCharacteristic = null;
+    let activeKey = null;
+    let isWriting = false;
+    const validKeys = ["q", "w", "e", "a", "s", "d", "z", "c"];
+    const encoder = new TextEncoder();
+
+    document.getElementById("connectBtn").addEventListener("click", async () => {
+      try {
+        const device = await navigator.bluetooth.requestDevice({
+          filters: [{ namePrefix: "BBC micro:bit" }],
+          optionalServices: [UART_SERVICE_UUID]
+        });
+
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(UART_SERVICE_UUID);
+        rxCharacteristic = await service.getCharacteristic(UART_RX_CHARACTERISTIC_UUID);
+
+        document.getElementById("status").textContent = "Connected!";
+      } catch (err) {
+        console.error(err);
+        document.getElementById("status").textContent = "Error: " + err.message;
+      }
+    });
+
+    async function sendCommand(cmd) {
+      if (!rxCharacteristic || isWriting) return;
+      isWriting = true;
+      try {
+        // Send command + newline (\n) to match serial.delimiters(Delimiters.NewLine)
+        await rxCharacteristic.writeValue(encoder.encode(cmd + "\n"));
+        document.getElementById("lastCmd").textContent = cmd === "x" ? "STOP (x)" : cmd.toUpperCase();
+      } catch (err) {
+        console.error("Write error:", err);
+      } finally {
+        isWriting = false;
+      }
+    }
+
+    // Physical Keyboard Listeners
+    document.addEventListener("keydown", (e) => {
+      const k = e.key.toLowerCase();
+      if (!validKeys.includes(k) || e.repeat) return;
+
+      activeKey = k;
+      document.getElementById("key-" + k)?.classList.add("active");
+      sendCommand(k);
+    });
+
+    document.addEventListener("keyup", (e) => {
+      const k = e.key.toLowerCase();
+      if (!validKeys.includes(k)) return;
+
+      document.getElementById("key-" + k)?.classList.remove("active");
+      if (activeKey === k) {
+        activeKey = null;
+        // Send "x" (or any unmapped key) to trigger your MakeCode `else` block and stop motors
+        sendCommand("x");
+      }
+    });
+
+    // Optional: Mouse / Touch support for clicking the on-screen buttons
+    validKeys.forEach((k) => {
+      const el = document.getElementById("key-" + k);
+      el.addEventListener("pointerdown", () => {
+        el.classList.add("active");
+        sendCommand(k);
+      });
+      el.addEventListener("pointerup", () => {
+        el.classList.remove("active");
+        sendCommand("x");
+      });
+    });
+  </script>
+</body>
+</html>
